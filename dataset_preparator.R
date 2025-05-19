@@ -1,72 +1,116 @@
 #!/usr/bin/env Rscript
+### Look for https://tomratford.co.uk/posts/tui-in-r-01/
+### For inspirations
 
-suppressMessages(require(data.table))
-suppressMessages(require(R.utils))
+suppressMessages(
+        for (package in c("data.table", "R.utils")) {
+                if (!require(package, character.only = T, quietly = T)) {
+                        install.packages(package)
+                        library(package, character.only = T)
+                }
+        }
+)
 
 ### Parameters
 args <- commandArgs(trailingOnly = TRUE)
 
-### Defaults 
-name_selection <- NULL
+### Defaults
+name_selection <- "Pseudomonas aeruginosa"
 taxrank <- "species"
-representative <- "t"
+representative <- "f"
 dryrun <- FALSE
 output_dir <- "output"
-domain <- "bacteria"  
-database_file <- NULL 
+domain <- "bacteria"
+database_file <- NULL
+
+## Sampling specific
+n_samples <- 20
+quality <- "good"
+
+sampling_proportion <- c("A:0.5, O:0.25, R:0.25")
+average_samples <- as.numeric(
+        gsub("A:(.*?),.*", "\\1", sampling_proportion)
+) * n_samples
+outliers_samples <- as.numeric(
+        gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)
+) * n_samples
+random_samples <- as.numeric(
+        gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)
+) * n_samples
+
+
+
 
 # Parse named arguments
 i <- 1
 while (i <= length(args)) {
-  if (args[i] %in% c("--name_selection", "-n")) {
-    name_selection <- args[i+1]
-    i <- i + 2
-  } else if (args[i] %in% c("--taxrank", "-t")) {
-    taxrank <- args[i+1]
-    i <- i + 2
-  } else if (args[i] %in% c("--representative_check", "-r")) {
-    representative_check <- args[i+1]
-    i <- i + 2
-  } else if (args[i] %in% c("--dryrun", "-d")) {
-    dryrun <- TRUE
-    i <- i + 1
-  } else if (args[i] %in% c("--output_dir", "-o")) {
-    output_dir <- args[i+1]
-    i <- i + 2
-  } else if (args[i] %in% c("--domain", "-m")) {  
-    domain <- tolower(args[i+1])
-    if (!domain %in% c("bacteria", "archaea")) {
-      stop("Domain must be either 'bacteria' or 'archaea'")
-    }
-    i <- i + 2
-  } else if (args[i] %in% c("--database", "-db")) {  
-    database_file <- args[i+1]
-    i <- i + 2
-  } else if (args[i] %in% c("--help", "-h")) {
-    cat("Usage: fasta_extractor [options]\n")
-    cat("Options:\n")
-    cat("  -n, --name_selection <name>   Name of the taxon to select (required)\n")
-    cat("  -t, --taxrank <rank>         Taxonomic rank [default: species]\n")
-    cat("  -r, --representative_check <t/f> Check for representative genomes [default: t]\n")
-    cat("  -d, --dryrun                 Dry run (no actual processing) [default: FALSE]\n")
-    cat("  -o, --output_dir <dir>       Output directory [default: output]\n")
-    cat("  -m, --domain <domain>        Domain (bacteria or archaea) [default: bacteria]\n")
-    cat("  -db, --database <file>       Custom database file path\n")
-    cat("  -h, --help                   Show this help message\n")
-    quit()
-  } else {
-    # Fallback to positional arguments
-    if (is.null(name_selection)) name_selection <- args[i]
-    else if (i == 2) taxrank <- args[i]
-    else if (i == 3) representative_check <- args[i]
-    else if (i == 4) dryrun <- as.logical(args[i])
-    i <- i + 1
-  }
+        if (args[i] %in% c("--name_selection", "-n")) {
+                name_selection <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--taxrank", "-t")) {
+                taxrank <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--n_samples", "-ns")) {
+                n_samples <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--sampling", "-ss")) {
+                sampling_proportion <- args[i + 1]
+                average_samples <- as.numeric(gsub("A:(.*?),.*", "\\1", sampling_proportion)) * n_samples
+                outliers_samples <- as.numeric(gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)) * n_samples
+                random_samples <- as.numeric(gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)) * n_samples
+                i <- i + 2
+        } else if (args[i] %in% c("--quality", "-q")) {
+                quality <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--representative_check", "-r")) {
+                representative_check <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--dryrun", "-d")) {
+                dryrun <- TRUE
+                i <- i + 1
+        } else if (args[i] %in% c("--output_dir", "-o")) {
+                output_dir <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--domain", "-m")) {
+                domain <- tolower(args[i + 1])
+                if (!domain %in% c("bacteria", "archaea")) {
+                        stop("Domain must be either 'bacteria' or 'archaea'")
+                }
+                i <- i + 2
+        } else if (args[i] %in% c("--database", "-db")) {
+                database_file <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--help", "-h")) {
+                cat("Usage: fasta_extractor [options]\n")
+                cat("Options:\n")
+                cat("  -n, --name_selection <name>   Name of the taxon to select (required)\n")
+                cat("  -ns, --n_samples <number>    Count of samples to sample(required)\n")
+                cat("  -ss, --sampling <schema>    Sampling schema(required)")
+                cat("  -q, --quality <good|bad|mixed> Sample quality [default: good] ")
+                cat("  -t, --taxrank <rank>         Taxonomic rank [default: species]\n")
+                cat("  -r, --representative_check <t/f> Check for representative genomes [default: t]\n")
+                cat("  -d, --dryrun                 Dry run (no actual processing) [default: FALSE]\n")
+                cat("  -o, --output_dir <dir>       Output directory [default: output]\n")
+                cat("  -m, --domain <domain>        Domain (bacteria or archaea) [default: bacteria]\n")
+                cat("  -db, --database <file>       Custom database file path\n")
+                cat("  -h, --help                   Show this help message\n")
+                quit()
+        } else {
+                # Fallback to positional arguments
+                if (is.null(name_selection)) {
+                        name_selection <- args[i]
+                } else if (i == 2) {
+                        taxrank <- args[i]
+                } else if (i == 3) {
+                        representative_check <- args[i]
+                } else if (i == 4) dryrun <- as.logical(args[i])
+                i <- i + 1
+        }
 }
 
 # Check if name_selection was givven
 if (is.null(name_selection)) {
-  stop("Error: --name_selection argument is required\nUse --help for usage information", call. = FALSE)
+        stop("Error: --name_selection argument is required\nUse --help for usage information", call. = FALSE)
 }
 ############################
 ## NOTE: 2. Tool download ##
@@ -74,52 +118,50 @@ if (is.null(name_selection)) {
 
 ### Database
 if (!is.null(database_file)) {
-  # Custom database
-  if (!file.exists(database_file)) {
-    stop(paste("Specified database file not found:", database_file))
-  }
-  cat("Loading custom database from:", database_file, "\n")
-  data <- fread(database_file)
+        # Custom database
+        if (!file.exists(database_file)) {
+                stop(paste("Specified database file not found:", database_file))
+        }
+        cat("Loading custom database from:", database_file, "\n")
+        data <- fread(database_file)
 } else {
-  # NOTE: DATABASE UPDATE MODIFY JUST THIS LINES
-  # Default GTDB database
-  if (domain == "bacteria") {
-    default_files <- c("bac120_metadata_r226.tsv.gz", "bac120_metadata_r226.tsv")
-    download_url <- "https://data.ace.uq.edu.au/public/gtdb/data/releases/release226/226.0/bac120_metadata_r226.tsv.gz"
-  } else if (domain == "archaea") {
-    default_files <- c("ar53_metadata_r226.tsv.gz", "ar53_metadata_r226.tsv")
-    download_url <- "https://data.ace.uq.edu.au/public/gtdb/data/releases/release226/226.0/ar53_metadata_r226.tsv.gz"
-  }
-
-## File check
-  file_detection <- list.files()
-  file_check <- default_files %in% file_detection
-
-  if (!any(file_check)) {
-    cat("Downloading", domain, "metadata from GTDB...\n")
-    data <- fread(download_url, header = TRUE)
-    local_file <- default_files[2]  # Save as uncompressed TSV
-    fwrite(data, local_file, sep = "\t")
-    cat("Saved database to:", local_file, "\n")
-  } else {
-    existing_file <- default_files[which(file_check)[1]]
-    cat("GTDB", domain, "database found, loading:", existing_file, "\n")
-    data <- fread(existing_file)
-  }
+        # NOTE: DATABASE UPDATE MODIFY JUST THIS LINES
+        # Default GTDB database
+        if (domain == "bacteria") {
+                default_files <- c("bac120_metadata_r226.tsv.gz", "bac120_metadata_r226.tsv")
+                download_url <- "https://data.ace.uq.edu.au/public/gtdb/data/releases/release226/226.0/bac120_metadata_r226.tsv.gz"
+        } else if (domain == "archaea") {
+                default_files <- c("ar53_metadata_r226.tsv.gz", "ar53_metadata_r226.tsv")
+                download_url <- "https://data.ace.uq.edu.au/public/gtdb/data/releases/release226/226.0/ar53_metadata_r226.tsv.gz"
+        }
+        ## File check
+        file_detection <- list.files()
+        file_check <- default_files %in% file_detection
+        if (!any(file_check)) {
+                cat("Downloading", domain, "metadata from GTDB...\n")
+                data <- fread(download_url, header = TRUE)
+                local_file <- default_files[2] # Save as uncompressed TSV
+                fwrite(data, local_file, sep = "\t")
+                cat("Saved database to:", local_file, "\n")
+        } else {
+                existing_file <- default_files[which(file_check)[1]]
+                cat("GTDB", domain, "database found, loading:", existing_file, "\n")
+                data <- fread(existing_file)
+        }
 }
 
 ## NCBI dataset
 if (!file.exists("datasets")) {
-  cat("Downloading NCBI datasets CLI tool...\n")
-  download.file(
-    "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets",
-    "datasets",
-    quiet = TRUE  
-  )
-  system("chmod +x datasets", ignore.stdout = TRUE, ignore.stderr = TRUE)
-  cat("NCBI datasets CLI tool installed and made executable\n")
+        cat("Downloading NCBI datasets CLI tool...\n")
+        download.file(
+                "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets",
+                "datasets",
+                quiet = TRUE
+        )
+        system("chmod +x datasets", ignore.stdout = TRUE, ignore.stderr = TRUE)
+        cat("NCBI datasets CLI tool installed and made executable\n")
 } else {
-  cat("NCBI datasets CLI tool found\n")
+        cat("NCBI datasets CLI tool found\n")
 }
 
 #################
@@ -144,141 +186,172 @@ tax_split <- function(dt) {
 processed_data <- tax_split(data)
 
 selection <- processed_data[
-        get(taxrank) == name_selection & gtdb_representative == representative, 
+        get(taxrank) == name_selection & gtdb_representative == representative,
 ]
 
 #######################
 ## NOTE: 3. Sampling ##
 #######################
 
-###FIX change to parameters
-n_samples<-20
 
-if(n_samples>nrow(selection)){
-print("Selected number of samples is higher than selection!")
+if (n_samples > nrow(selection)) {
+        print("Selected number of samples is higher than selection!")
         quit(status = 0)
 }
 
-### Highquality genomes
-
-n_samples<-20
-contamination_thresh<-as.numeric(quantile(selection$checkm2_contamination,0.25))
-completness_thresh<-as.numeric(quantile(selection$checkm2_completeness,0.75))
-contig_count_thresh<-as.numeric(quantile(selection$contig_count,0.25))
-
-selection_quality<- selection[selection$checkm2_contamination<=contamination&
-                              selection$checkm2_completeness>=completness&
-                              selection$contig_count<=contig_count
-                             ,]
-
-
-relax_increment <- 0.05  # How much to relax thresholds if too few samples pass
-relax_steps <- 0
-
-while (nrow(selection_quality) < n_samples & relax_steps < 4) {  
-  relax_steps <- relax_steps + 1
-  contamination_thresh <- contamination_thresh * (1 + relax_increment)
-  completenes_thresh <- completenes_thresh * (1 - relax_increment)
-  contig_count_thresh <- contig_count_thresh * (1 + relax_increment)
-  selection_quality <- selection[
-    selection$checkm2_contamination <= contamination_thresh &
-    selection$checkm2_completeness >= completenes_thresh &
-    selection$contig_count <= contig_count_thresh,
-  ]
-  n_available <- nrow(selection_quality)
-  message(
-    "Relaxing thresholds (step ", relax_steps, "): ",
-    "Contamination ≤ ", round(contamination_thresh, 2), ", ",
-    "Completeness ≥ ", round(completenes_thresh, 2), ", ",
-    "Contigs ≤ ", round(contig_count_thresh, 2), ". ",
-    "Now ", nrow(selection_quality), " samples available."
-  )
+# Define thresholds based on external 'quality' variable
+if (quality == "good") {
+        contamination_thresh <- as.numeric(quantile(selection$checkm2_contamination, 0.25)) # Lower = better
+        completeness_thresh <- as.numeric(quantile(selection$checkm2_completeness, 0.75)) # Higher = better
+        contig_count_thresh <- as.numeric(quantile(selection$contig_count, 0.25)) # Lower = better
+} else if (quality == "bad") {
+        contamination_thresh <- as.numeric(quantile(selection$checkm2_contamination, 0.75)) # Higher = worse
+        completeness_thresh <- as.numeric(quantile(selection$checkm2_completeness, 0.25)) # Lower = worse
+        contig_count_thresh <- as.numeric(quantile(selection$contig_count, 0.75)) # Higher = worse
+} else if (quality == "mixed") {
+        # Skip filtering entirely
+        selection_quality <- selection
+        message("Quality 'mixed': No thresholds applied. Using all ", nrow(selection), " samples.")
+} else {
+        stop("Invalid 'quality' value. Must be 'good', 'bad', or 'mixed'.")
 }
 
+
+# Apply thresholds (skip if quality = "mixed")
+if (quality == "good") {
+        selection_quality <- selection[
+                selection$checkm2_contamination <= contamination_thresh &
+                        selection$checkm2_completeness >= completeness_thresh &
+                        selection$contig_count <= contig_count_thresh,
+        ]
+
+        relax_increment <- 0.05
+        relax_steps <- 0
+
+        while (nrow(selection_quality) < n_samples & relax_steps < 4 & quality != "mixed") {
+                relax_steps <- relax_steps + 1
+                contamination_thresh <- contamination_thresh * (1 + relax_increment)
+                completeness_thresh <- completeness_thresh * (1 - relax_increment)
+                contig_count_thresh <- contig_count_thresh * (1 + relax_increment)
+
+                selection_quality <- selection[
+                        selection$checkm2_contamination <= contamination_thresh &
+                                selection$checkm2_completeness >= completeness_thresh &
+                                selection$contig_count <= contig_count_thresh,
+                ]
+                message(
+                        "Relaxing thresholds (step ", relax_steps, "): ",
+                        "Contamination ≤ ", round(contamination_thresh, 2), ", ",
+                        "Completeness ≥ ", round(completeness_thresh, 2), ", ",
+                        "Contigs ≤ ", round(contig_count_thresh, 2), ". ",
+                        "Now ", nrow(selection_quality), " samples available."
+                )
+        }
+} else if (quality == "bad") {
+        selection_quality <- selection[
+                selection$checkm2_contamination >= contamination_thresh &
+                        selection$checkm2_completeness <= completeness_thresh
+        ]
+
+        relax_increment <- 0.05
+        relax_steps <- 0
+
+        while (nrow(selection_quality) < n_samples & relax_steps < 4 & quality != "mixed") {
+                relax_steps <- relax_steps + 1
+                contamination_thresh <- contamination_thresh * (1 + relax_increment)
+                completeness_thresh <- completeness_thresh * (1 - relax_increment)
+
+                selection_quality <- selection[
+                        selection$checkm2_contamination <= contamination_thresh &
+                                selection$checkm2_completeness >= completeness_thresh
+                ]
+                message(
+                        "Relaxing thresholds (step ", relax_steps, "): ",
+                        "Contamination ≤ ", round(contamination_thresh, 2), ", ",
+                        "Completeness ≥ ", round(completeness_thresh, 2), ", ",
+                        "Now ", nrow(selection_quality), " samples available."
+                )
+        }
+}
 # Final sampling
 if (nrow(selection_quality) == 0) {
-  stop("No samples met even relaxed quality thresholds. Adjust criteria or data.")
+        stop("No samples met even relaxed quality thresholds. Adjust criteria or data.")
 } else if (nrow(selection_quality) < n_samples) {
-  if (allow_replacement) {
-    warning(
-      "Only ", nrow(selection_quality), " high-quality samples available. ",
-      "Sampling with replacement to reach ", n_samples, "."
-    )
-    selection_final <- selection_quality[sample(n_available, n_samples, replace = TRUE), ]
-  } else {
-    warning(
-      "Only ", nrow(selection_quality), " high-quality samples available. ",
-      "Returning all (fewer than ", n_samples, ")."
-    )
-    selection_final <- selection_quality
-  }
+        warning(
+                "Only ", nrow(selection_quality), " high-quality samples available. ",
+                "Returning all (fewer than ", n_samples, ")."
+        )
+        selection_final <- selection_quality
 } else {
-  selection_final <- selection_quality[sample(nrow(selection_quality), n_samples, replace = FALSE), ]
+        selection_final <- selection_quality
 }
 
 require(cluster)
 
-col_omitt<-c(1, 5, 9, 18, 19, 20, 21, 22, 23, 28, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 44, 45, 46, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 78, 79, 80, 82, 83, 86, 87, 88, 91, 94, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 114, 115, 116, 117, 118, 119)
-selection_final<-selection_final[, .SD, .SDcols = -col_omitt]
+rnames <- selection_final[, c("ncbi_genbank_assembly_accession")][["ncbi_genbank_assembly_accession"]]
 
-gower_dist <- daisy(selection_final, 
-                    metric = "gower"
-                    )
-distance<- 1 -  as.matrix(gower_dist)
+col_omitt <- c("checkm2_model", "gtdb_genome_representative", "lsu23s_query_id", "lsu_5s_query_id", "lsu_silva_23s_blast_subject_id", "ncbi_contig_count", "ncbi_contig_n50", "ncbi_data", "ncbi_isolate", "ncbi_lat_lon", "ncbi_wgs_master", "ncbi_seq_rel_date")
+
+to_num_cols <- c("lsu_23s_contig_len", "lsu_23s_length", "lsu_5s_contig_len", "lsu_5s_length", "lsu_silva_23s_blast_align_len", "lsu_silva_23s_blast_bitscore", "lsu_silva_23s_blast_perc_identity", "ncbi_contig_count", "ncbi_contig_n50", "ncbi_ncrna_count", "ncbi_protein_count", "ncbi_rrna_count", "ncbi_scaffold_count", "ncbi_scaffold_l50", "ncbi_scaffold_n50", "ncbi_scaffold_n75", "ncbi_scaffold_n90", "ncbi_ssu_count", "ncbi_trna_count", "ssu_contig_len", "ssu_gg_blast_align_len", "ssu_gg_blast_bitscore", "ssu_gg_blast_evalue", "ssu_gg_blast_perc_identity", "ssu_length", "ssu_silva_blast_align_len", "ssu_silva_blast_bitscore", "ssu_silva_blast_perc_identity")
+# selection_final <- selection_final[, .SD, .SDcols = -col_omitt]
+# Convert all character columns to factors in-place
+char_cols <- names(selection_final)[sapply(selection_final, is.character)]
+selection_final[, (char_cols) := lapply(.SD, as.factor), .SDcols = char_cols]
+selection_final[, (to_num_cols) := lapply(.SD, as.numeric), .SDcols = to_num_cols]
+
+gower_dist <- daisy(selection_final[, -c("ncbi_genbank_assembly_accession", "ncbi_date")],
+        metric = "gower"
+)
+
+distance <- 1 - as.matrix(gower_dist)
 row_similarity <- rowMeans(distance)
+names(row_similarity) <- rnames
+
+
 ### To print
-global_similarity<-mean(distance)
+global_similarity <- mean(distance)
 
-## User confirmation and sample count check
-sample_sel<-order(row_similarity, decreasing = TRUE)[1:n_samples]
+print(paste0("Average sample similarity: ", round(global_similarity, digits = 2)))
+### FIX: Check for the user described sample proportion
+### For now different selections can overlap which is bad
 
-
-
-
-
-
-
-
-
+## 50% Average samples (the most similar)
+## 25% Outliers
+## 25% Random
 
 
 ## User confirmation and sample count check
-n_records <- nrow(selection)
-unique_species <- processed_data[, .N, by = get(taxrank)][order(-N)]
-colnames(unique_species) <- c("Name", "N")
-unique_species[, distance := adist(Name, name_selection)]
-setorder(unique_species, distance)
-top_similar <- unique_species[Name != name_selection][1:min(10, .N)]
+sample_sel_avgerage <- order(row_similarity, decreasing = TRUE)[1:average_samples]
+average_id <- names(row_similarity[sample_sel_avgerage])
+row_similarity <- row_similarity[!names(row_similarity) %in% average_id]
+sample_sel_outlieres <- order(row_similarity, decreasing = FALSE)[1:outliers_samples]
+outliers_id <- names(row_similarity[sample_sel_outlieres])
+row_similarity <- row_similarity[!names(row_similarity) %in% outliers_id]
 
-if (dryrun == TRUE) {
-        cat(paste0("\n", name_selection, " ", n_records, " records found.\n"))
-        if (nrow(top_similar) > 0) {
-                cat("\nSimilar records:\n(Not selected for download)\n")
-                print(top_similar[, .(Name = Name, Records = N)])
-                quit(status = 0)
-        } else {
-                cat("\nNo similar species found\n")
-        }
-}
+set.seed(1256)
 
-cat(paste0("\n", name_selection, " ", n_records, " records found.\n"))
-if (nrow(top_similar) > 0) {
-        cat("\nSimilar records:\n(Not selected for download)\n")
-        print(top_similar[, .(Name = Name, Records = N)])
-} else {
-        cat("\nNo similar species found\n")
-}
-cat("Would you like to proceed with the download? [y/n]: ")
-response <- readLines("stdin", n = 1)
-if (!tolower(response) %in% c("y", "yes")) {
-        cat("Aborting at user request.\n")
-        quit(status = 0)
-}
+random_id <- names(sample(
+        x = row_similarity,
+        size = random_samples,
+        replace = FALSE
+))
+sample_list <- c(average_id, outliers_id, random_id)
+
+dataset_list <- subset(selection_final, ncbi_genbank_assembly_accession %in% sample_list)
+
+## Prep a list of low quality samples
+
+## Final list
+## FIX: not working
+selection <- dataset_list[, c("ncbi_genbank_assembly_accession")]
 
 ## Accession write (for datasets tool)
+fwrite(dataset_list, "sample_metadata.csv", col.names = TRUE)
 fwrite(selection, "download_accession_list.txt", col.names = FALSE)
 
-## Genomes download
+
+
+## genomes download
 system("./datasets download genome accession --inputfile download_accession_list.txt --dehydrated --include genome")
 unzip("ncbi_dataset.zip")
 system("./datasets rehydrate --directory .")
