@@ -3,7 +3,7 @@
 ### For inspirations
 
 suppressMessages(
-        for (package in c("data.table", "R.utils")) {
+        for (package in c("data.table", "R.utils","cluster")) {
                 if (!require(package, character.only = T, quietly = T)) {
                         install.packages(package)
                         library(package, character.only = T)
@@ -37,8 +37,6 @@ outliers_samples <- as.numeric(
 random_samples <- as.numeric(
         gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)
 ) * n_samples
-
-
 
 
 # Parse named arguments
@@ -224,16 +222,13 @@ if (quality == "good") {
                         selection$checkm2_completeness >= completeness_thresh &
                         selection$contig_count <= contig_count_thresh,
         ]
-
         relax_increment <- 0.05
         relax_steps <- 0
-
         while (nrow(selection_quality) < n_samples & relax_steps < 4 & quality != "mixed") {
                 relax_steps <- relax_steps + 1
                 contamination_thresh <- contamination_thresh * (1 + relax_increment)
                 completeness_thresh <- completeness_thresh * (1 - relax_increment)
                 contig_count_thresh <- contig_count_thresh * (1 + relax_increment)
-
                 selection_quality <- selection[
                         selection$checkm2_contamination <= contamination_thresh &
                                 selection$checkm2_completeness >= completeness_thresh &
@@ -252,10 +247,8 @@ if (quality == "good") {
                 selection$checkm2_contamination >= contamination_thresh &
                         selection$checkm2_completeness <= completeness_thresh
         ]
-
         relax_increment <- 0.05
         relax_steps <- 0
-
         while (nrow(selection_quality) < n_samples & relax_steps < 4 & quality != "mixed") {
                 relax_steps <- relax_steps + 1
                 contamination_thresh <- contamination_thresh * (1 + relax_increment)
@@ -286,20 +279,66 @@ if (nrow(selection_quality) == 0) {
         selection_final <- selection_quality
 }
 
-require(cluster)
-
 rnames <- selection_final[, c("ncbi_genbank_assembly_accession")][["ncbi_genbank_assembly_accession"]]
-
 col_omitt <- c("checkm2_model", "gtdb_genome_representative", "lsu23s_query_id", "lsu_5s_query_id", "lsu_silva_23s_blast_subject_id", "ncbi_contig_count", "ncbi_contig_n50", "ncbi_data", "ncbi_isolate", "ncbi_lat_lon", "ncbi_wgs_master", "ncbi_seq_rel_date")
-
 to_num_cols <- c("lsu_23s_contig_len", "lsu_23s_length", "lsu_5s_contig_len", "lsu_5s_length", "lsu_silva_23s_blast_align_len", "lsu_silva_23s_blast_bitscore", "lsu_silva_23s_blast_perc_identity", "ncbi_contig_count", "ncbi_contig_n50", "ncbi_ncrna_count", "ncbi_protein_count", "ncbi_rrna_count", "ncbi_scaffold_count", "ncbi_scaffold_l50", "ncbi_scaffold_n50", "ncbi_scaffold_n75", "ncbi_scaffold_n90", "ncbi_ssu_count", "ncbi_trna_count", "ssu_contig_len", "ssu_gg_blast_align_len", "ssu_gg_blast_bitscore", "ssu_gg_blast_evalue", "ssu_gg_blast_perc_identity", "ssu_length", "ssu_silva_blast_align_len", "ssu_silva_blast_bitscore", "ssu_silva_blast_perc_identity")
+
+distance_variables <- c(
+# Category: Identification and Accession
+"accession",
+# Category: Taxonomy
+"gtdb_taxonomy",
+"ncbi_taxonomy",
+"phylium",
+"class",
+"order",
+"family",
+"genus",
+"species",
+"ncbi_translation_table",
+## Category: Basic Stats
+"gc_percentage",
+"genome_size",
+# Category: Genome Quality
+"checkm2_completeness",
+"checkm2_contamination",
+"checkm_strain_heterogeneity",
+# Category: Assembly Statistics
+"n50_contigs",
+"contig_count",
+"longest_contig",
+"ncbi_contig_n50",
+"total_gap_length",
+"ncbi_total_gap_length",
+"ncbi_contig_count",
+# Category: Gene and RNA Counts
+"ssu_count",
+"lsu_23s_count",
+"protein_count",
+"ncbi_ncrna_count",
+"ncbi_rrna_count",
+"ncbi_trna_count",
+"trna_aa_count",
+"trna_selenocysteine_count",
+# Category: Environmental and Geodata
+"ncbi_genome_category",
+"ncbi_bioproject",
+"ncbi_country",
+"ncbi_genome_representation",
+"ncbi_isolation_source",
+"ncbi_lat_lon"
+)
+
 # selection_final <- selection_final[, .SD, .SDcols = -col_omitt]
 # Convert all character columns to factors in-place
 char_cols <- names(selection_final)[sapply(selection_final, is.character)]
 selection_final[, (char_cols) := lapply(.SD, as.factor), .SDcols = char_cols]
 selection_final[, (to_num_cols) := lapply(.SD, as.numeric), .SDcols = to_num_cols]
 
-gower_dist <- daisy(selection_final[, -c("ncbi_genbank_assembly_accession", "ncbi_date")],
+
+
+
+gower_dist <- daisy(selection_final[, ..distance_variables],
         metric = "gower"
 )
 
@@ -342,13 +381,11 @@ dataset_list <- subset(selection_final, ncbi_genbank_assembly_accession %in% sam
 ## Prep a list of low quality samples
 
 ## Final list
-## FIX: not working
 selection <- dataset_list[, c("ncbi_genbank_assembly_accession")]
 
 ## Accession write (for datasets tool)
 fwrite(dataset_list, "sample_metadata.csv", col.names = TRUE)
 fwrite(selection, "download_accession_list.txt", col.names = FALSE)
-
 
 
 ## genomes download
