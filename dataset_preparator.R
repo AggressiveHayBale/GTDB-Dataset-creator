@@ -3,7 +3,7 @@
 ### For inspirations
 
 suppressMessages(
-        for (package in c("data.table", "R.utils","cluster")) {
+        for (package in c("data.table", "R.utils", "cluster")) {
                 if (!require(package, character.only = T, quietly = T)) {
                         install.packages(package)
                         library(package, character.only = T)
@@ -22,22 +22,13 @@ dryrun <- FALSE
 output_dir <- "output"
 domain <- "bacteria"
 database_file <- NULL
-
 ## Sampling specific
 n_samples <- 20
 quality <- "good"
-
 sampling_proportion <- c("A:0.5, O:0.25, R:0.25")
-average_samples <- as.numeric(
-        gsub("A:(.*?),.*", "\\1", sampling_proportion)
-) * n_samples
-outliers_samples <- as.numeric(
-        gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)
-) * n_samples
-random_samples <- as.numeric(
-        gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)
-) * n_samples
-
+## Genome Size bands
+min_size <- 0
+max_size <- Inf
 
 # Parse named arguments
 i <- 1
@@ -50,15 +41,22 @@ while (i <= length(args)) {
                 i <- i + 2
         } else if (args[i] %in% c("--n_samples", "-ns")) {
                 n_samples <- args[i + 1]
+                n_samples <- as.numeric(n_samples)
                 i <- i + 2
         } else if (args[i] %in% c("--sampling", "-ss")) {
                 sampling_proportion <- args[i + 1]
                 average_samples <- as.numeric(gsub("A:(.*?),.*", "\\1", sampling_proportion)) * n_samples
-                outliers_samples <- as.numeric(gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)) * n_samples
-                random_samples <- as.numeric(gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)) * n_samples
+                outliers_samples <- round(as.numeric(gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)) * n_samples)
+                random_samples <- round(as.numeric(gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)) * n_samples)
                 i <- i + 2
         } else if (args[i] %in% c("--quality", "-q")) {
                 quality <- args[i + 1]
+                i <- i + 2
+        } else if (args[i] %in% c("--min_size")) {
+                min_size <- as.numeric(args[i + 1])
+                i <- i + 2
+        } else if (args[i] %in% c("--max_size")) {
+                max_size <- as.numeric(args[i + 1])
                 i <- i + 2
         } else if (args[i] %in% c("--representative_check", "-r")) {
                 representative_check <- args[i + 1]
@@ -107,9 +105,65 @@ while (i <= length(args)) {
 }
 
 # Check if name_selection was givven
-if (is.null(name_selection)) {
-        stop("Error: --name_selection argument is required\nUse --help for usage information", call. = FALSE)
+if (is.null(name_selection)) stop("--name_selection is required")
+if (!taxrank %in% c("species", "genus", "family")) {
+        stop("taxrank must be species, genus, or family")
 }
+if (!quality %in% c("good", "bad", "mixed")) {
+        stop("quality must be good, bad, or mixed")
+}
+if (!representative %in% c("t", "f")) {
+        stop("representative must be t or f")
+}
+if (!domain %in% c("bacteria", "archaea")) {
+        stop("domain must be bacteria or archaea")
+}
+
+cat("\n\033[1mGTDB Dataset Builder Parameters\033[0m\n")
+cat(rep("-", 60), "\n", sep = "")
+
+# Core parameters
+cat("\033[1;34mCore Settings:\033[0m\n")
+cat(sprintf("  %-25s: %s", "Taxonomic name", name_selection), "\n")
+cat(sprintf("  %-25s: %s", "Taxonomic rank", taxrank), "\n")
+cat(sprintf("  %-25s: %s", "Domain", domain), "\n")
+cat(sprintf("  %-25s: %s", "Output directory", output_dir), "\n")
+cat(sprintf(
+        "  %-25s: %s", "Representative genomes",
+        ifelse(representative == "t", "Yes", "No")
+), "\n")
+
+# Sampling parameters
+cat("\n\033[1;34mSampling Strategy:\033[0m\n")
+cat(sprintf("  %-25s: %d", "Total samples", n_samples), "\n")
+cat(sprintf("  %-25s: %s", "Quality level", quality), "\n")
+cat(sprintf("  %-25s: %s", "Sampling schema", sampling_proportion), "\n")
+cat(sprintf(
+        "  %-25s: %s", "Average genomes",
+        average_samples
+), "\n")
+cat(sprintf(
+        "  %-25s: %s", "Outlier genomes",
+        outliers_samples
+), "\n")
+cat(sprintf(
+        "  %-25s: %s", "Random genomes",
+        random_samples
+), "\n")
+
+# Operational parameters
+cat("\n\033[1;34mOperational Settings:\033[0m\n")
+cat(sprintf(
+        "  %-25s: %s", "Dry run mode",
+        ifelse(dryrun, "Yes", "No")
+), "\n")
+cat(sprintf(
+        "  %-25s: %s", "Database",
+        ifelse(is.null(database_file), "Default", database_file)
+), "\n")
+
+cat(rep("-", 60), "\n\n", sep = "")
+
 ############################
 ## NOTE: 2. Tool download ##
 ############################
@@ -185,7 +239,7 @@ processed_data <- tax_split(data)
 
 selection <- processed_data[
         get(taxrank) == name_selection & gtdb_representative == representative,
-]
+][genome_size >= min_size & genome_size <= max_size, ]
 
 #######################
 ## NOTE: 3. Sampling ##
@@ -280,56 +334,54 @@ if (nrow(selection_quality) == 0) {
 }
 
 rnames <- selection_final[, c("ncbi_genbank_assembly_accession")][["ncbi_genbank_assembly_accession"]]
-col_omitt <- c("checkm2_model", "gtdb_genome_representative", "lsu23s_query_id", "lsu_5s_query_id", "lsu_silva_23s_blast_subject_id", "ncbi_contig_count", "ncbi_contig_n50", "ncbi_data", "ncbi_isolate", "ncbi_lat_lon", "ncbi_wgs_master", "ncbi_seq_rel_date")
 to_num_cols <- c("lsu_23s_contig_len", "lsu_23s_length", "lsu_5s_contig_len", "lsu_5s_length", "lsu_silva_23s_blast_align_len", "lsu_silva_23s_blast_bitscore", "lsu_silva_23s_blast_perc_identity", "ncbi_contig_count", "ncbi_contig_n50", "ncbi_ncrna_count", "ncbi_protein_count", "ncbi_rrna_count", "ncbi_scaffold_count", "ncbi_scaffold_l50", "ncbi_scaffold_n50", "ncbi_scaffold_n75", "ncbi_scaffold_n90", "ncbi_ssu_count", "ncbi_trna_count", "ssu_contig_len", "ssu_gg_blast_align_len", "ssu_gg_blast_bitscore", "ssu_gg_blast_evalue", "ssu_gg_blast_perc_identity", "ssu_length", "ssu_silva_blast_align_len", "ssu_silva_blast_bitscore", "ssu_silva_blast_perc_identity")
 
 distance_variables <- c(
-# Category: Identification and Accession
-"accession",
-# Category: Taxonomy
-"gtdb_taxonomy",
-"ncbi_taxonomy",
-"phylium",
-"class",
-"order",
-"family",
-"genus",
-"species",
-"ncbi_translation_table",
-## Category: Basic Stats
-"gc_percentage",
-"genome_size",
-# Category: Genome Quality
-"checkm2_completeness",
-"checkm2_contamination",
-"checkm_strain_heterogeneity",
-# Category: Assembly Statistics
-"n50_contigs",
-"contig_count",
-"longest_contig",
-"ncbi_contig_n50",
-"total_gap_length",
-"ncbi_total_gap_length",
-"ncbi_contig_count",
-# Category: Gene and RNA Counts
-"ssu_count",
-"lsu_23s_count",
-"protein_count",
-"ncbi_ncrna_count",
-"ncbi_rrna_count",
-"ncbi_trna_count",
-"trna_aa_count",
-"trna_selenocysteine_count",
-# Category: Environmental and Geodata
-"ncbi_genome_category",
-"ncbi_bioproject",
-"ncbi_country",
-"ncbi_genome_representation",
-"ncbi_isolation_source",
-"ncbi_lat_lon"
+        # Category: Identification and Accession
+        "accession",
+        # Category: Taxonomy
+        "gtdb_taxonomy",
+        "ncbi_taxonomy",
+        "phylium",
+        "class",
+        "order",
+        "family",
+        "genus",
+        "species",
+        "ncbi_translation_table",
+        ## Category: Basic Stats
+        "gc_percentage",
+        "genome_size",
+        # Category: Genome Quality
+        "checkm2_completeness",
+        "checkm2_contamination",
+        "checkm_strain_heterogeneity",
+        # Category: Assembly Statistics
+        "n50_contigs",
+        "contig_count",
+        "longest_contig",
+        "ncbi_contig_n50",
+        "total_gap_length",
+        "ncbi_total_gap_length",
+        "ncbi_contig_count",
+        # Category: Gene and RNA Counts
+        "ssu_count",
+        "lsu_23s_count",
+        "protein_count",
+        "ncbi_ncrna_count",
+        "ncbi_rrna_count",
+        "ncbi_trna_count",
+        "trna_aa_count",
+        "trna_selenocysteine_count",
+        # Category: Environmental and Geodata
+        "ncbi_genome_category",
+        "ncbi_bioproject",
+        "ncbi_country",
+        "ncbi_genome_representation",
+        "ncbi_isolation_source",
+        "ncbi_lat_lon"
 )
 
-# selection_final <- selection_final[, .SD, .SDcols = -col_omitt]
 # Convert all character columns to factors in-place
 char_cols <- names(selection_final)[sapply(selection_final, is.character)]
 selection_final[, (char_cols) := lapply(.SD, as.factor), .SDcols = char_cols]
