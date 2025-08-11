@@ -25,10 +25,18 @@ database_file <- NULL
 ## Sampling specific
 n_samples <- 20
 quality <- "good"
+sampling_method <- "exclusive"
 sampling_proportion <- c("A:0.5, O:0.25, R:0.25")
 ## Genome Size bands
 min_size <- 0
 max_size <- Inf
+
+
+
+## Logic for dummy sampling
+average_samples <- as.numeric(gsub("A:(.*?),.*", "\\1", sampling_proportion)) * n_samples
+outliers_samples <- round(as.numeric(gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)) * n_samples)
+random_samples <- round(as.numeric(gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)) * n_samples)
 
 # Parse named arguments
 i <- 1
@@ -76,12 +84,16 @@ while (i <= length(args)) {
         } else if (args[i] %in% c("--database", "-db")) {
                 database_file <- args[i + 1]
                 i <- i + 2
+        } else if (args[i] %in% c("--sampling_method")) {
+                sampling_method <- tolower(args[i + 1])
+                i <- i + 2
         } else if (args[i] %in% c("--help", "-h")) {
                 cat("Usage: fasta_extractor [options]\n")
                 cat("Options:\n")
                 cat("  -n, --name_selection <name>   Name of the taxon to select (required)\n")
                 cat("  -ns, --n_samples <number>    Count of samples to sample(required)\n")
                 cat("  -ss, --sampling <schema>    Sampling schema(required)")
+                cat("  --sampling <schema>    TODO: ADD")
                 cat("  -q, --quality <good|bad|mixed> Sample quality [default: good] ")
                 cat("  -t, --taxrank <rank>         Taxonomic rank [default: species]\n")
                 cat("  -r, --representative_check <t/f> Check for representative genomes [default: t]\n")
@@ -138,6 +150,7 @@ cat("\n\033[1;34mSampling Strategy:\033[0m\n")
 cat(sprintf("  %-25s: %d", "Total samples", n_samples), "\n")
 cat(sprintf("  %-25s: %s", "Quality level", quality), "\n")
 cat(sprintf("  %-25s: %s", "Sampling schema", sampling_proportion), "\n")
+cat(sprintf("  %-25s: %s", "Sampling method", sampling_method), "\n")
 cat(sprintf(
         "  %-25s: %s", "Average genomes",
         average_samples
@@ -272,9 +285,9 @@ if (quality == "good") {
 # Apply thresholds (skip if quality = "mixed")
 if (quality == "good") {
         selection_quality <- selection[
-                selection$checkm2_contamination <= contamination_thresh &
-                        selection$checkm2_completeness >= completeness_thresh &
-                        selection$contig_count <= contig_count_thresh,
+                checkm2_contamination <= contamination_thresh &
+                        checkm2_completeness >= completeness_thresh &
+                        contig_count <= contig_count_thresh,
         ]
         relax_increment <- 0.05
         relax_steps <- 0
@@ -298,8 +311,8 @@ if (quality == "good") {
         }
 } else if (quality == "bad") {
         selection_quality <- selection[
-                selection$checkm2_contamination >= contamination_thresh &
-                        selection$checkm2_completeness <= completeness_thresh
+                checkm2_contamination >= contamination_thresh &
+                        checkm2_completeness <= completeness_thresh
         ]
         relax_increment <- 0.05
         relax_steps <- 0
@@ -389,46 +402,143 @@ selection_final[, (to_num_cols) := lapply(.SD, as.numeric), .SDcols = to_num_col
 
 
 
+## NOTE: Added more robust sampling
+need_dissimilarity <- sampling_method %in% c("kmedoids", "maxmin", "hybrid") ||
+        (sampling_method == "exclusive" && average_samples > 0)
 
-gower_dist <- daisy(selection_final[, ..distance_variables],
-        metric = "gower"
-)
-
-distance <- 1 - as.matrix(gower_dist)
-row_similarity <- rowMeans(distance)
-names(row_similarity) <- rnames
+dissimilarity_matrix <- NULL
+row_similarity <- NULL
+if (need_dissimilarity) {
+        gower_dist <- daisy(selection_final[, ..distance_variables], metric = "gower")
+        dissimilarity_matrix <- as.matrix(gower_dist) # 0..1 dissimilarity
+        similarity_matrix <- 1 - dissimilarity_matrix
+        row_similarity <- rowMeans(similarity_matrix, na.rm = TRUE)
+        names(row_similarity) <- selection_final$ncbi_genbank_assembly_accession
+}
 
 
 ### To print
-global_similarity <- mean(distance)
+# global_similarity <- mean(distance)
+#
+# print(paste0("Average sample similarity: ", round(global_similarity, digits = 2)))
 
-print(paste0("Average sample similarity: ", round(global_similarity, digits = 2)))
-### FIX: Check for the user described sample proportion
-### For now different selections can overlap which is bad
+### NOTE: New updated sampling
+sample_exclusive <- function(selection_final, row_similarity, counts) {
+        # counts: named vector c(average=..., outliers=..., random=...)
+        if (is.null(row_similarity)) stop("row_similarity required for exclusive sampling")
+        ids <- names(row_similarity)
+        # Most similar (average)
+        n_avg <- counts["average"]
+        n_out <- counts["outliers"]
+        n_rand <- counts["random"]
+        avg_ids <- if (n_avg > 0) names(sort(row_similarity, decreasing = TRUE))[seq_len(min(n_avg, length(row_similarity)))] else character(0)
+        remaining <- setdiff(ids, avg_ids)
+        out_ids <- if (n_out > 0 && length(remaining) > 0) names(sort(row_similarity[remaining], decreasing = FALSE))[seq_len(min(n_out, length(remaining)))] else character(0)
+        remaining2 <- setdiff(remaining, out_ids)
+        rand_ids <- if (n_rand > 0 && length(remaining2) > 0) sample(remaining2, size = min(n_rand, length(remaining2)), replace = FALSE) else character(0)
+        selected <- unique(c(avg_ids, out_ids, rand_ids))
+        list(selected_ids = selected, groups = list(average = avg_ids, outliers = out_ids, random = rand_ids))
+}
+sample_kmedoids <- function(selection_final, dissimilarity_matrix, k) {
+        if (is.null(dissimilarity_matrix)) stop("dissimilarity_matrix required for kmedoids")
+        # cluster::pam accepts a dissimilarity object or matrix (diss=TRUE)
+        pam_res <- pam(as.dist(dissimilarity_matrix), k = min(k, nrow(selection_final)), diss = TRUE)
+        medoid_idx <- pam_res$id.med
+        ids <- selection_final$ncbi_genbank_assembly_accession[medoid_idx]
+        list(selected_ids = ids, groups = list(medoids = ids, pam = pam_res))
+}
+sample_maxmin <- function(selection_final, dissimilarity_matrix, k, seed = 1256) {
+        set.seed(seed)
+        ids <- selection_final$ncbi_genbank_assembly_accession
+        n <- length(ids)
+        k <- min(k, n)
+        # start with a random seed or most central (choose central for reproducibility)
+        central_idx <- which.min(rowMeans(dissimilarity_matrix, na.rm = TRUE))
+        selected_idx <- central_idx
+        while (length(selected_idx) < k) {
+                remaining_idx <- setdiff(seq_len(n), selected_idx)
+                # distance of each remaining to nearest selected
+                nearest_dist <- sapply(remaining_idx, function(i) min(dissimilarity_matrix[i, selected_idx], na.rm = TRUE))
+                next_idx <- remaining_idx[which.max(nearest_dist)]
+                selected_idx <- c(selected_idx, next_idx)
+        }
+        selected_ids <- ids[selected_idx]
+        list(selected_ids = selected_ids, groups = list(maxmin = selected_ids))
+}
+sample_stratified <- function(selection_final, strata_cols = "ncbi_genome_category", total_n, seed = 1256) {
+        set.seed(seed)
+        if (!all(strata_cols %in% names(selection_final))) stop("strata columns not present")
+        sel <- copy(selection_final)
+        # create a single stratum key by pasting columns
+        sel[, .stratum := do.call(paste, c(.SD, sep = "__")), .SDcols = strata_cols]
+        strata_sizes <- sel[, .N, by = .stratum]
+        # allocate proportional counts
+        strata_sizes[, alloc := floor(N / sum(N) * total_n)]
+        remainder <- total_n - sum(strata_sizes$alloc)
+        if (remainder > 0) {
+                # give extra to largest strata
+                ord <- order(strata_sizes$N, decreasing = TRUE)
+                strata_sizes$alloc[ord[seq_len(remainder)]] <- strata_sizes$alloc[ord[seq_len(remainder)]] + 1
+        }
+        selected_ids <- character(0)
+        for (i in seq_len(nrow(strata_sizes))) {
+                st <- strata_sizes$.stratum[i]
+                k <- strata_sizes$alloc[i]
+                rows <- sel[.stratum == st]
+                if (k > 0 && nrow(rows) > 0) {
+                        choose_n <- min(k, nrow(rows))
+                        selected_ids <- c(selected_ids, sample(rows$ncbi_genbank_assembly_accession, choose_n))
+                }
+        }
+        list(selected_ids = unique(selected_ids), groups = list(stratified = selected_ids))
+}
+sample_hybrid <- function(selection_final, dissimilarity_matrix, strata_cols, per_stratum_k, seed = 1256) {
+        set.seed(seed)
+        sel <- copy(selection_final)
+        sel[, .stratum := do.call(paste, c(.SD, sep = "__")), .SDcols = strata_cols]
+        selected_ids <- character(0)
+        groups <- list()
+        for (st in unique(sel$.stratum)) {
+                subset_idx <- which(sel$.stratum == st)
+                sub_n <- length(subset_idx)
+                k <- min(per_stratum_k, sub_n)
+                if (k <= 0) next
+                sub_diss <- dissimilarity_matrix[subset_idx, subset_idx, drop = FALSE]
+                res <- sample_maxmin(sel[subset_idx], sub_diss, k = k, seed = seed)
+                selected_ids <- c(selected_ids, res$selected_ids)
+                groups[[st]] <- res$selected_ids
+        }
+        list(selected_ids = unique(selected_ids), groups = groups)
+}
+# counts parsed earlier: average_samples,outliers_samples,random_samples
+counts <- c(average = average_samples, outliers = outliers_samples, random = random_samples)
 
-## 50% Average samples (the most similar)
-## 25% Outliers
-## 25% Random
+sampling_result <- switch(sampling_method,
+        "exclusive" = sample_exclusive(selection_final, row_similarity, counts),
+        "kmedoids" = {
+                k <- n_samples
+                sample_kmedoids(selection_final, dissimilarity_matrix, k)
+        },
+        "maxmin" = {
+                k <- n_samples
+                sample_maxmin(selection_final, dissimilarity_matrix, k, seed = 1256)
+        },
+        "stratified" = {
+                # choose strata col(s); could add CLI option e.g. --strata "ncbi_country"
+                strata_cols <- "ncbi_genome_category"
+                sample_stratified(selection_final, strata_cols, n_samples, seed = 1256)
+        },
+        "hybrid" = {
+                strata_cols <- "ncbi_genome_category"
+                per_stratum_k <- max(1, floor(n_samples / length(unique(selection_final[[strata_cols]]))))
+                sample_hybrid(selection_final, dissimilarity_matrix, strata_cols, per_stratum_k, seed = 1256)
+        },
+        stop("Unknown sampling_method: ", sampling_method)
+)
 
-
-## User confirmation and sample count check
-sample_sel_avgerage <- order(row_similarity, decreasing = TRUE)[1:average_samples]
-average_id <- names(row_similarity[sample_sel_avgerage])
-row_similarity <- row_similarity[!names(row_similarity) %in% average_id]
-sample_sel_outlieres <- order(row_similarity, decreasing = FALSE)[1:outliers_samples]
-outliers_id <- names(row_similarity[sample_sel_outlieres])
-row_similarity <- row_similarity[!names(row_similarity) %in% outliers_id]
-
-set.seed(1256)
-
-random_id <- names(sample(
-        x = row_similarity,
-        size = random_samples,
-        replace = FALSE
-))
-sample_list <- c(average_id, outliers_id, random_id)
-
+sample_list <- sampling_result$selected_ids
 dataset_list <- subset(selection_final, ncbi_genbank_assembly_accession %in% sample_list)
+
 
 ## Prep a list of low quality samples
 
@@ -441,6 +551,10 @@ fwrite(selection, "download_accession_list.txt", col.names = FALSE)
 
 
 ## genomes download
+if (dryrun == TRUE) {
+        dataset_list
+        stop("Dry run mode quitting")
+}
 system("./datasets download genome accession --inputfile download_accession_list.txt --dehydrated --include genome")
 unzip("ncbi_dataset.zip")
 system("./datasets rehydrate --directory .")
