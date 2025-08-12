@@ -1,6 +1,11 @@
 #!/usr/bin/env Rscript
-### Look for https://tomratford.co.uk/posts/tui-in-r-01/
-### For inspirations
+###############################################################################
+# GTDB genome downloader
+#   * Selects taxonomic subset from GTDB metadata
+#   * Applies quality filters
+#   * Samples genomes with different strategies
+#   * Downloads FASTA files via NCBI datasets CLI
+###############################################################################
 
 suppressMessages(
         for (package in c("data.table", "R.utils", "cluster")) {
@@ -10,6 +15,10 @@ suppressMessages(
                 }
         }
 )
+
+###############################################################################
+# 1. Command-line interface
+###############################################################################
 
 ### Parameters
 args <- commandArgs(trailingOnly = TRUE)
@@ -25,15 +34,13 @@ database_file <- NULL
 ## Sampling specific
 n_samples <- 20
 quality <- "good"
-sampling_method <- "exclusive"
+sampling_method <- "custom"
 sampling_proportion <- c("A:0.5, O:0.25, R:0.25")
 ## Genome Size bands
 min_size <- 0
 max_size <- Inf
 
-
-
-## Logic for dummy sampling
+## Logic for default sampling_proportion
 average_samples <- as.numeric(gsub("A:(.*?),.*", "\\1", sampling_proportion)) * n_samples
 outliers_samples <- round(as.numeric(gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)) * n_samples)
 random_samples <- round(as.numeric(gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)) * n_samples)
@@ -88,21 +95,25 @@ while (i <= length(args)) {
                 sampling_method <- tolower(args[i + 1])
                 i <- i + 2
         } else if (args[i] %in% c("--help", "-h")) {
-                cat("Usage: fasta_extractor [options]\n")
-                cat("Options:\n")
-                cat("  -n, --name_selection <name>   Name of the taxon to select (required)\n")
-                cat("  -ns, --n_samples <number>    Count of samples to sample(required)\n")
-                cat("  -ss, --sampling <schema>    Sampling schema(required)")
-                cat("  --sampling <schema>    TODO: ADD")
-                cat("  -q, --quality <good|bad|mixed> Sample quality [default: good] ")
-                cat("  -t, --taxrank <rank>         Taxonomic rank [default: species]\n")
-                cat("  -r, --representative_check <t/f> Check for representative genomes [default: t]\n")
-                cat("  -d, --dryrun                 Dry run (no actual processing) [default: FALSE]\n")
-                cat("  -o, --output_dir <dir>       Output directory [default: output]\n")
-                cat("  -m, --domain <domain>        Domain (bacteria or archaea) [default: bacteria]\n")
-                cat("  -db, --database <file>       Custom database file path\n")
-                cat("  -h, --help                   Show this help message\n")
-                quit()
+                cat("Usage: gtdb_downloader.R [options]\n\n")
+                cat("Required:\n")
+                cat("  -n, --name_selection <str>  Target taxon name\n")
+                cat("  -ns, --n_samples <int>        Number of genomes to sample\n")
+                cat("       --sampling_method <custom|kmedoids|maxmin|stratified|hybrid>\n")
+                cat("Optional:\n")
+                cat("  -ss, --sampling <str>       Proportion schema (A:avg,O:out,R:rand)\n\n")
+                cat("  -t,  --taxrank <rank>       [species|genus|family]  (default: species)\n")
+                cat("  -q,  --quality <level>     [good|bad|mixed]        (default: good)\n")
+                cat("       --min_size <num>                               (default: 0)\n")
+                cat("       --max_size <num>                               (default: Inf)\n")
+                cat("  -r,  --representative <t|f>  Only representatives  (default: f)\n")
+                cat("  -m,  --domain <bacteria|archaea>                 (default: bacteria)\n")
+                cat("  -o,  --output_dir <dir>                           (default: output)\n")
+                cat("  -db, --database <file>  Custom GTDB TSV           (optional)\n")
+                cat("       --sampling_method <custom|kmedoids|maxmin|stratified|hybrid>\n")
+                cat("  -d,  --dryrun                                   (default: FALSE)\n")
+                cat("  -h,  --help                                     Show this text\n")
+                quit(status = 0)
         } else {
                 # Fallback to positional arguments
                 if (is.null(name_selection)) {
@@ -130,6 +141,11 @@ if (!representative %in% c("t", "f")) {
 if (!domain %in% c("bacteria", "archaea")) {
         stop("domain must be bacteria or archaea")
 }
+
+###############################################################################
+# 4. Console header
+###############################################################################
+
 
 cat("\n\033[1mGTDB Dataset Builder Parameters\033[0m\n")
 cat(rep("-", 60), "\n", sep = "")
@@ -229,9 +245,9 @@ if (!file.exists("datasets")) {
         cat("NCBI datasets CLI tool found\n")
 }
 
-#################
-## NOTE: 2. SRC##
-#################
+###############################################################################
+# 6. Metadata processing
+###############################################################################
 
 tax_split <- function(dt) {
         ## tax split
@@ -244,25 +260,31 @@ tax_split <- function(dt) {
         return(dt)
 }
 
-########################
-## NOTE: 3. File input##
-########################
-## List prep
 processed_data <- tax_split(data)
+###############################################################################
+# 7. Subset selection
+###############################################################################
 
 selection <- processed_data[
-        get(taxrank) == name_selection & gtdb_representative == representative,
-][genome_size >= min_size & genome_size <= max_size, ]
+        get(taxrank) == name_selection &
+                gtdb_representative == representative &
+                genome_size >= min_size &
+                genome_size <= max_size,
+]
 
-#######################
-## NOTE: 3. Sampling ##
-#######################
-
-
-if (n_samples > nrow(selection)) {
-        print("Selected number of samples is higher than selection!")
-        quit(status = 0)
+if (nrow(selection) == 0) {
+        print("No genomes match the specified criteria.")
+        quit(status = 150)
 }
+if (n_samples > nrow(selection)) {
+        warning("Requested samples > available genomes. Using all ", nrow(selection), " entries.")
+        n_samples <- nrow(selection)
+}
+
+
+###############################################################################
+# 8. Quality filtering
+###############################################################################
 
 # Define thresholds based on external 'quality' variable
 if (quality == "good") {
@@ -401,10 +423,13 @@ selection_final[, (char_cols) := lapply(.SD, as.factor), .SDcols = char_cols]
 selection_final[, (to_num_cols) := lapply(.SD, as.numeric), .SDcols = to_num_cols]
 
 
+###############################################################################
+# 9. Sampling
+###############################################################################
 
 ## NOTE: Added more robust sampling
 need_dissimilarity <- sampling_method %in% c("kmedoids", "maxmin", "hybrid") ||
-        (sampling_method == "exclusive" && average_samples > 0)
+        (sampling_method == "custom" && average_samples > 0)
 
 dissimilarity_matrix <- NULL
 row_similarity <- NULL
@@ -422,10 +447,9 @@ if (need_dissimilarity) {
 #
 # print(paste0("Average sample similarity: ", round(global_similarity, digits = 2)))
 
-### NOTE: New updated sampling
-sample_exclusive <- function(selection_final, row_similarity, counts) {
+sample_custom <- function(selection_final, row_similarity, counts) {
         # counts: named vector c(average=..., outliers=..., random=...)
-        if (is.null(row_similarity)) stop("row_similarity required for exclusive sampling")
+        if (is.null(row_similarity)) stop("row_similarity required for custom sampling")
         ids <- names(row_similarity)
         # Most similar (average)
         n_avg <- counts["average"]
@@ -514,7 +538,7 @@ sample_hybrid <- function(selection_final, dissimilarity_matrix, strata_cols, pe
 counts <- c(average = average_samples, outliers = outliers_samples, random = random_samples)
 
 sampling_result <- switch(sampling_method,
-        "exclusive" = sample_exclusive(selection_final, row_similarity, counts),
+        "custom" = sample_custom(selection_final, row_similarity, counts),
         "kmedoids" = {
                 k <- n_samples
                 sample_kmedoids(selection_final, dissimilarity_matrix, k)
@@ -524,7 +548,7 @@ sampling_result <- switch(sampling_method,
                 sample_maxmin(selection_final, dissimilarity_matrix, k, seed = 1256)
         },
         "stratified" = {
-                # choose strata col(s); could add CLI option e.g. --strata "ncbi_country"
+                # TODO choose strata col(s); could add CLI option e.g. --strata "ncbi_country"
                 strata_cols <- "ncbi_genome_category"
                 sample_stratified(selection_final, strata_cols, n_samples, seed = 1256)
         },
@@ -539,9 +563,6 @@ sampling_result <- switch(sampling_method,
 sample_list <- sampling_result$selected_ids
 dataset_list <- subset(selection_final, ncbi_genbank_assembly_accession %in% sample_list)
 
-
-## Prep a list of low quality samples
-
 ## Final list
 selection <- dataset_list[, c("ncbi_genbank_assembly_accession")]
 
@@ -550,10 +571,13 @@ fwrite(dataset_list, "sample_metadata.csv", col.names = TRUE)
 fwrite(selection, "download_accession_list.txt", col.names = FALSE)
 
 
-## genomes download
+###############################################################################
+# 11. Genome download
+###############################################################################
 if (dryrun == TRUE) {
         dataset_list
-        stop("Dry run mode quitting")
+        cat("Dry run mode quitting")
+        quit(status = 0)
 }
 system("./datasets download genome accession --inputfile download_accession_list.txt --dehydrated --include genome")
 unzip("ncbi_dataset.zip")
@@ -563,10 +587,11 @@ suppressMessages(file.rename(
         from = list.files(path = "ncbi_dataset/data/", pattern = "\\.fna$", recursive = TRUE, full.names = TRUE),
         to = file.path(paste0("./", output_dir), basename(list.files("ncbi_dataset/data/", "\\.fna$", recursive = TRUE)))
 ))
-
-## Cleanup
+###############################################################################
+# 12. Clean-up
+###############################################################################
 rm_list <- c("download_accession_list.txt", "ncbi_dataset.zip", "md5sum.txt", "README.md")
 suppressMessages(file.remove(rm_list))
 suppressMessages(system("rm -r ncbi_dataset"))
 
-print("Download completed")
+print("Download completed! \n", "output directory:", output_dir)
