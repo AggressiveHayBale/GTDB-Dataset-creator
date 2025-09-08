@@ -21,13 +21,13 @@ The tool's primary purpose is to create well-encompassing datasets specifically 
 
 The tool is self-contained and requires no explicit installation:
 ```
-chmod +x gtdb_downloader.R 
+chmod +x dataset_preparator.R.R 
 ```
 Dependencies will be automatically installed on first execution.
 
 ## Usage
 ```
-./gtdb_downloader.R --tax_name "Pseudomonas aeruginosa" --n_samples 20
+./dataset_preparator.R.R --tax_name "Pseudomonas aeruginosa" --n_samples 20
 ```
 ## Parameters
 
@@ -116,15 +116,15 @@ The tool generates:
 
 ### Basic usage for high-quality Pseudomonas aeruginosa genomes for benchmarking
 ```
-./gtdb_downloader.R --tax_name "Pseudomonas aeruginosa" --n_samples 50 --quality good --output_dir paeruginosa_benchmark_set 
+./dataset_preparator.R.R --tax_name "Pseudomonas aeruginosa" --n_samples 50 --quality good --output_dir paeruginosa_benchmark_set 
 ```
 ### Advanced sampling with custom proportions for comparative analysis
 ```
-./gtdb_downloader.R --tax_name "Enterobacteriaceae" --taxrank family --n_samples 100 --sampling "A:0.4,O:0.3,R:0.3" --sampling_method custom --domain bacteria
+./dataset_preparator.R.R --tax_name "Enterobacteriaceae" --taxrank family --n_samples 100 --sampling "A:0.4,O:0.3,R:0.3" --sampling_method custom --domain bacteria
 ```
 ### Stratified sampling by genome category for comprehensive benchmarking
 ```
-./gtdb_downloader.R \ --tax_name "Mycobacterium tuberculosis"  --n_samples 30 --sampling_method stratified --quality mixed 
+./dataset_preparator.R.R \ --tax_name "Mycobacterium tuberculosis"  --n_samples 30 --sampling_method stratified --quality mixed 
 ```
 ## Notes
 
