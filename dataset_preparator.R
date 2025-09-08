@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 ###############################################################################
-# GTDB genome downloader
+# GTDB Dataset creation tool
 #   * Selects taxonomic subset from GTDB metadata
 #   * Applies quality filters
 #   * Samples genomes with different strategies
