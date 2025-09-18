@@ -26,13 +26,13 @@ args <- commandArgs(trailingOnly = TRUE)
 ### Defaults
 name_selection <- "Pseudomonas aeruginosa"
 taxrank <- "species"
-representative <- "f"
+representative <- "t"
 dryrun <- FALSE
 output_dir <- "output"
 domain <- "bacteria"
 database_file <- NULL
 ## Sampling specific
-n_samples <- 20
+n_samples <-20
 quality <- "good"
 sampling_method <- "custom"
 sampling_proportion <- c("A:0.5, O:0.25, R:0.25")
@@ -40,15 +40,11 @@ sampling_proportion <- c("A:0.5, O:0.25, R:0.25")
 min_size <- 0
 max_size <- Inf
 
-## Logic for default sampling_proportion
-average_samples <- as.numeric(gsub("A:(.*?),.*", "\\1", sampling_proportion)) * n_samples
-outliers_samples <- round(as.numeric(gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)) * n_samples)
-random_samples <- round(as.numeric(gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)) * n_samples)
 
 # Parse named arguments
 i <- 1
 while (i <= length(args)) {
-        if (args[i] %in% c("--name_selection", "-n")) {
+        if (args[i] %in% c("--name", "-n")) {
                 name_selection <- args[i + 1]
                 i <- i + 2
         } else if (args[i] %in% c("--taxrank", "-t")) {
@@ -74,7 +70,7 @@ while (i <= length(args)) {
                 max_size <- as.numeric(args[i + 1])
                 i <- i + 2
         } else if (args[i] %in% c("--representative_check", "-r")) {
-                representative_check <- args[i + 1]
+                representative <- args[i + 1]
                 i <- i + 2
         } else if (args[i] %in% c("--dryrun", "-d")) {
                 dryrun <- TRUE
@@ -97,7 +93,7 @@ while (i <= length(args)) {
         } else if (args[i] %in% c("--help", "-h")) {
                 cat("Usage: gtdb_downloader.R [options]\n\n")
                 cat("Required:\n")
-                cat("  -n, --name_selection <str>  Target taxon name\n")
+                cat("  -n, --name <str>  Target taxon name\n")
                 cat("  -ns, --n_samples <int>        Number of genomes to sample\n")
                 cat("       --sampling_method <custom|kmedoids|maxmin|stratified|hybrid>\n")
                 cat("Optional:\n")
@@ -121,15 +117,20 @@ while (i <= length(args)) {
                 } else if (i == 2) {
                         taxrank <- args[i]
                 } else if (i == 3) {
-                        representative_check <- args[i]
+                        representative <- args[i]
                 } else if (i == 4) dryrun <- as.logical(args[i])
                 i <- i + 1
         }
 }
 
+## Logic for default sampling_proportion
+average_samples <- as.numeric(gsub("A:(.*?),.*", "\\1", sampling_proportion)) * n_samples
+outliers_samples <- round(as.numeric(gsub(".*O:([0-9.]+)[, ].*", "\\1", sampling_proportion)) * n_samples)
+random_samples <- round(as.numeric(gsub(".*R:([0-9.]+).*", "\\1", sampling_proportion)) * n_samples)
+
 # Check if name_selection was givven
 if (is.null(name_selection)) stop("--name_selection is required")
-if (!taxrank %in% c("species", "genus", "family")) {
+if (!taxrank %in% c("species", "genus", "family","class", "phylum", "domain")) {
         stop("taxrank must be species, genus, or family")
 }
 if (!quality %in% c("good", "bad", "mixed")) {
@@ -251,27 +252,25 @@ if (!file.exists("datasets")) {
 
 tax_split <- function(dt) {
         ## tax split
-        tax_levels <- c("phylium", "class", "order", "family", "genus", "species")
-        dt[, (tax_levels) := tstrsplit(gtdb_taxonomy, ";")[2:7]]
+        tax_levels <- c("domain","phylium", "class", "order", "family", "genus", "species")
+        dt[, (tax_levels) := tstrsplit(gtdb_taxonomy, ";")[1:7]]
         ## Pref remove
         for (col in tax_levels) {
                 dt[, (col) := sub("^[a-z]__", "", get(col))]
         }
         return(dt)
 }
-
+print("Processing database, please wait ...")
 processed_data <- tax_split(data)
 ###############################################################################
 # 7. Subset selection
 ###############################################################################
-
 selection <- processed_data[
         get(taxrank) == name_selection &
                 gtdb_representative == representative &
                 genome_size >= min_size &
                 genome_size <= max_size,
 ]
-
 if (nrow(selection) == 0) {
         print("No genomes match the specified criteria.")
         quit(status = 150)
@@ -355,6 +354,7 @@ if (quality == "good") {
                 )
         }
 }
+
 # Final sampling
 if (nrow(selection_quality) == 0) {
         stop("No samples met even relaxed quality thresholds. Adjust criteria or data.")
@@ -390,7 +390,7 @@ distance_variables <- c(
         # Category: Genome Quality
         "checkm2_completeness",
         "checkm2_contamination",
-        "checkm_strain_heterogeneity",
+        "checkm2_strain_heterogeneity",
         # Category: Assembly Statistics
         "n50_contigs",
         "contig_count",
@@ -576,7 +576,7 @@ fwrite(selection, "download_accession_list.txt", col.names = FALSE)
 ###############################################################################
 if (dryrun == TRUE) {
         dataset_list
-        cat("Dry run mode quitting")
+        cat("Dry run mode quitting \n sample_metadata.csv file was created with your data")
         quit(status = 0)
 }
 system("./datasets download genome accession --inputfile download_accession_list.txt --dehydrated --include genome")
@@ -593,5 +593,5 @@ suppressMessages(file.rename(
 rm_list <- c("download_accession_list.txt", "ncbi_dataset.zip", "md5sum.txt", "README.md")
 suppressMessages(file.remove(rm_list))
 suppressMessages(system("rm -r ncbi_dataset"))
-
-print("Download completed! \n", "output directory:", output_dir)
+print(paste("Download completed!"))
+print(paste0("Output directory:", output_dir))
