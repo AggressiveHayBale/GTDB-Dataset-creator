@@ -31,53 +31,25 @@ Dependencies will be automatically installed on first execution.
 ```
 ## Parameters
 
-Core Parameters
 
-- --tax_name, -n [required]
-Target taxon name (e.g., "Pseudomonas aeruginosa")
+| Parameter | Short Flag | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **`--name`** | **`-n`** | **Required** | Target taxon name (e.g., 'Pseudomonas aeruginosa'). |
+| **`--n_samples`** | (None) | `20` | Number of genomes to sample. |
+| **`--sampling_method`** | (None) | `custom` | Sampling strategy: `custom` &vert; `kmedoids` &vert; `maxmin` &vert; `stratified` &vert; `hybrid`. |
+| **`--taxrank`** | **`-t`** | `species` | Taxonomic rank: `species` &vert; `genus` &vert; `family` &vert; `class` &vert; `phylum` &vert; `domain`. |
+| **`--quality`** | **`-q`** | `good` | Quality filter level: `good` &vert; `bad` &vert; `mixed`. |
+| **`--representative`** | **`-r`** | `f` | Only include representative genomes (`t`/`f`). |
+| **`--min_size`** | (None) | `0` | Minimum genome size in base pairs. |
+| **`--max_size`** | (None) | `Inf` | Maximum genome size in base pairs. |
+| **`--domain`** | **`-m`** | `bacteria` | Domain to query: `bacteria` &vert; `archaea`. |
+| **`--sampling_proportion`** | **`-s`** | `"A:0.5,O:0.25,R:0.25"` | Proportion schema for **`custom`** method. (A:average, O:outlier, R:random). |
+| **`--strata_cols`** | (None) | `"ncbi_genome_category"` | Comma-separated column(s) for `stratified`/`hybrid` sampling. |
+| **`--database`** | (None) | `NULL` | Path to a custom GTDB metadata TSV file (optional). |
+| **`--output_dir`** | **`-o`** | `output` | Output directory for FASTA files. |
+| **`--dryrun`** | **`-d`** | `FALSE` | Run script without downloading genomes. |
+| **`--help`** | (None) | (Auto) | Display help information and exit. |
 
-- --taxrank, -t [default: species]
-Taxonomic rank for selection: species, genus, or family
-
-- --domain, -m [default: bacteria]
-Domain to query: bacteria or archaea
-
-- --representative, -r [default: f]
-Restrict to representative genomes only (t/f)
-
-Sampling Parameters
-
-- --n_samples, -ns [required]
-Total number of genomes to sample
-
-- --sampling_method [default: custom]
-Sampling strategy: custom, kmedoids, maxmin, stratified, or hybrid
-
-- --sampling, -ss [default: "A:0.5,O:0.25,R:0.25"]
-Proportion schema for custom sampling:
-- A: Average/representative genomes
-- O: Outlier/divergent genomes
-- R: Random genomes
-
-- --quality, -q [default: good]
-Quality filter level: good, bad, or mixed
-
-- --min_size, --max_size
-Genome size filters (in base pairs)
-
-Operational Parameters
-
-- --output_dir, -o [default: output]
-Directory for downloaded genomes
-
-- --database, -db
-Path to custom GTDB metadata file
-
-- --dryrun, -d
-Perform a dry run without downloading genomes
-
-- --help, -h
-Display help information
 
 ## Sampling Methods
 
