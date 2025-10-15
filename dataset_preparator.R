@@ -390,7 +390,7 @@ distance_variables <- c(
         # Category: Genome Quality
         "checkm2_completeness",
         "checkm2_contamination",
-        "checkm2_strain_heterogeneity",
+        "checkm_strain_heterogeneity",
         # Category: Assembly Statistics
         "n50_contigs",
         "contig_count",
