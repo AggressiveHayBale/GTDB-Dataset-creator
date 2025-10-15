@@ -26,7 +26,7 @@ args <- commandArgs(trailingOnly = TRUE)
 ### Defaults
 name_selection <- "Pseudomonas aeruginosa"
 taxrank <- "species"
-representative <- "t"
+representative <- "f"
 dryrun <- FALSE
 output_dir <- "output"
 domain <- "bacteria"
@@ -39,7 +39,6 @@ sampling_proportion <- c("A:0.5, O:0.25, R:0.25")
 ## Genome Size bands
 min_size <- 0
 max_size <- Inf
-
 
 # Parse named arguments
 i <- 1
